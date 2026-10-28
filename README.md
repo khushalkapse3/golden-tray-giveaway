@@ -53,7 +53,7 @@ npm run validate:graphql      # checks every GraphQL document against the 2026-1
 1. **`.env`:**
    - `SHOPIFY_DOMAIN=staging-purdy-global.myshopify.com`;
    - `SHOPIFY_ACCESS_TOKEN`: linc-app's staging token works, since it has `write_order_edits`;
-   - `SHOPIFY_WEBHOOK_SECRET`: that app's API secret key (linc-app's `SHOPIFY_SECRET_KEY`);
+   - `SHOPIFY_WEBHOOK_SECRET`: the store webhook signing secret (linc-app's `SHOPIFY_WEBHOOK_SECRET`, not `SHOPIFY_SECRET_KEY`);
    - `ADMIN_PASSWORD`, and `PUBLIC_URL` (your ngrok https URL).
 2. **Turn off linc-app's own golden tray code** (`GOLDEN_TRAY_MODE=off`), so the two don't both add trays.
 3. **Start the app and log in.** Then, under Settings:
