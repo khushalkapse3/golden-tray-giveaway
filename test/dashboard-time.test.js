@@ -70,3 +70,37 @@ test('results do not depend on the computer time zone running the test', () => {
   // The test runner is started under several TZ values by the shell loop in the notes; here just assert the pure result.
   assert.equal(zoneInputToIso('2026-11-06T12:30', ZONES.ist.tz).value, '2026-11-06T07:00:00.000Z');
 });
+
+// --- chart axis: label spacing must never make labels overlap -----------------------------------
+const { tickStepHours } = require('../public/app.js');
+
+test('tickStepHours: the real 12 hour window on a normal screen keeps hourly or 2-hourly labels', () => {
+  assert.ok([1, 2].includes(tickStepHours(12, 1000)));
+  assert.equal(tickStepHours(12, 1500), 1);
+});
+
+test('tickStepHours: a long window gets sparse labels (the overlap seen on a multi-day window)', () => {
+  // ~72 h across 1500 px must not put a label on every hour
+  const step = tickStepHours(72, 1500);
+  assert.ok(step >= 3, `step ${step}`);
+  assert.ok(72 / step <= 1500 / 70, 'at most one label per 70 px');
+});
+
+test('tickStepHours: narrower charts get fewer labels', () => {
+  assert.ok(tickStepHours(12, 300) >= tickStepHours(12, 900));
+});
+
+test('tickStepHours: never more labels than fit (70 px each) for any window and width', () => {
+  for (const hours of [1, 6, 12, 24, 48, 72, 168, 720]) {
+    for (const width of [200, 300, 500, 800, 1200, 1700]) {
+      const step = tickStepHours(hours, width);
+      assert.ok([1, 2, 3, 4, 6, 12, 24, 48, 168].includes(step), `step ${step}`);
+      if (step < 168) assert.ok(hours / step <= Math.max(width / 70, 1) + 1, `${hours} h in ${width} px with step ${step}`);
+    }
+  }
+});
+
+test('tickStepHours: tiny or invalid inputs fall back to 1', () => {
+  assert.equal(tickStepHours(0, 800), 1);
+  assert.equal(tickStepHours(NaN, 800), 1);
+});

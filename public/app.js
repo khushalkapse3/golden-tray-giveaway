@@ -96,6 +96,19 @@
     return `${fmtDay(zone.tz, ms)}, ${fmtHMS(zone.tz, ms)} ${zone.label} · ${fmtDay('UTC', ms)}, ${fmtHMS('UTC', ms)} UTC · ${fmtHMS(o.tz, ms)} ${o.label}`;
   }
 
+  /**
+   * Hours between chart time labels, so labels never overlap: at most one label per ~70 px,
+   * using a step that lands on clean clock hours (1, 2, 3, 4, 6, 12 h, then whole days / weeks).
+   */
+  function tickStepHours(totalHours, plotWidthPx) {
+    if (!(totalHours > 0) || !(plotWidthPx > 0)) return 1;
+    const maxLabels = Math.max(Math.floor(plotWidthPx / 70), 1);
+    for (const step of [1, 2, 3, 4, 6, 12, 24, 48, 168]) {
+      if (totalHours / step <= maxLabels) return step;
+    }
+    return 168;
+  }
+
   function fmtDuration(ms) {
     if (ms < 0) ms = 0;
     const s = Math.floor(ms / 1000);
@@ -110,7 +123,7 @@
 
   // Node-only hook so the time helpers can be unit-checked: node -e "require('./public/app.js')"
   if (!IS_BROWSER) {
-    if (typeof module !== 'undefined') module.exports = { ZONES, zoneById, otherZone, zoneInputToIso, isoToZoneInput, convertInputZone, tzOffsetMs, partsIn, fmtDuration };
+    if (typeof module !== 'undefined') module.exports = { ZONES, zoneById, otherZone, zoneInputToIso, isoToZoneInput, convertInputZone, tickStepHours, tzOffsetMs, partsIn, fmtDuration };
     return;
   }
 
@@ -1098,14 +1111,19 @@
     svgEl.append(s('text', { class: 'panel-label', x: M.l, y: y2 - 6 }, `Eligible orders per ${tl.bucketMinutes || 15} min`));
 
     // x ticks on IST whole hours
-    const hourStep = plotW < 380 ? 3 : plotW < 700 ? 2 : 1;
+    const spanHours = (e0 - s0) / 3600000;
+    const hourStep = tickStepHours(spanHours, plotW);
     const zoneOffset = tzOffsetMs(zone.tz, s0);
     let t = Math.ceil((s0 + zoneOffset) / 3600000) * 3600000 - zoneOffset;
     for (; t <= e0; t += 3600000) {
-      const hr = partsIn(zone.tz, t).hour;
-      if (hr % hourStep !== 0) continue;
+      const p = partsIn(zone.tz, t);
+      // Whole-day steps label midnight; shorter steps label hours that fall on a multiple of the step.
+      if (hourStep >= 24 ? (p.hour !== 0 || Math.round((t - s0) / 86400000) % (hourStep / 24) !== 0) : p.hour % hourStep !== 0) continue;
       const xx = x(t);
-      svgEl.append(s('text', { class: 'axis-text', x: xx, y: y2 + botH + 16, 'text-anchor': 'middle' }, fmtHM(zone.tz, t)));
+      // A label that would run off either end of the plot is skipped.
+      if (xx < M.l - 4 || xx > M.l + plotW + 4) continue;
+      const label = hourStep >= 24 || (spanHours > 30 && p.hour === 0) ? `${fmtDay(zone.tz, t)}` : fmtHM(zone.tz, t);
+      svgEl.append(s('text', { class: 'axis-text', x: xx, y: y2 + botH + 16, 'text-anchor': 'middle' }, label));
     }
     svgEl.append(s('line', { class: 'baseline', x1: M.l, x2: M.l + plotW, y1: y1(0), y2: y1(0) }));
     svgEl.append(s('line', { class: 'baseline', x1: M.l, x2: M.l + plotW, y1: yb(0), y2: yb(0) }));
