@@ -25,6 +25,8 @@ The design and the reasons behind it are in `../plan.md`. The HTTP API is in `AP
 8. **Backfill** (every 3 min) catches any order whose webhook never arrived.
 9. **Auto-pace** (optional) moves N towards the suggestion so the cap is reached by the end of the window.
 
+**Time zone:** the whole dashboard can be shown in **IST** (default) or **UK** (London, GMT/BST) with the switch in the header. The choice is remembered in the browser. Every time on the page changes, window fields you have typed but not saved keep meaning the same moment, and UTC plus the other zone are always shown beside it. Times are stored and sent to the server as UTC either way.
+
 Campaign settings live in the database and are changed from the dashboard. Env vars are only for infrastructure and secrets. Tray, SKU and tag settings are locked while the giveaway is live.
 
 ## Run it

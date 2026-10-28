@@ -4,13 +4,20 @@
 
   const IS_BROWSER = typeof document !== 'undefined';
 
-  // ================================================================ time (India Standard Time)
-  // Admins are in India, so every campaign time is entered and shown in IST (Asia/Kolkata, UTC+5:30,
-  // no daylight saving), with UTC beside it. The UK time is only a hint (the campaign is defined in UK time).
+  // ================================================================ time zones (IST or UK)
+  // The whole dashboard is shown in one of two zones, chosen with the IST / UK switch in the header:
+  // IST (Asia/Kolkata, UTC+5:30, no daylight saving; the default, the admins are in India) or UK
+  // (Europe/London, GMT/BST; the campaign window is defined in UK time). UTC and the other zone are
+  // always shown beside it as hints.
 
-  const ZONE = 'Asia/Kolkata';
-  const ZONE_LABEL = 'IST';
-  const UK = 'Europe/London';
+  const ZONES = {
+    ist: { id: 'ist', tz: 'Asia/Kolkata', label: 'IST', name: 'IST (India, UTC+5:30)' },
+    uk: { id: 'uk', tz: 'Europe/London', label: 'UK', name: 'UK time (London, GMT in winter, BST in summer)' },
+  };
+  const zoneById = (id) => ZONES[id] || ZONES.ist;
+  const otherZone = (z) => (z.id === 'ist' ? ZONES.uk : ZONES.ist);
+  /** The zone everything is currently shown in. Changed only by setZone(). */
+  let zone = ZONES.ist;
   const dtfCache = new Map();
   function dtf(tz, opts) {
     const key = (tz || 'local') + JSON.stringify(opts);
@@ -44,31 +51,38 @@
   const pad2 = (n) => String(n).padStart(2, '0');
 
   /**
-   * "2026-11-06T12:30" read as IST wall-clock time -> UTC ISO string.
-   * Independent of the browser's own time zone. (Written generically: it would also handle
-   * zones with daylight saving, and rejects a wall-clock time that does not exist.)
+   * "2026-11-06T12:30" read as wall-clock time in zone `tz` (default: the current zone) -> UTC ISO string.
+   * Independent of the browser's own time zone. Handles daylight saving, and rejects a wall-clock
+   * time that does not exist (the hour skipped when UK clocks go forward).
    */
-  function zoneInputToIso(str) {
+  function zoneInputToIso(str, tz) {
+    const z = tz || zone.tz;
     const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(str || '').trim());
     if (!m) return { error: 'Enter a date and time' };
     const [y, mo, d, hh, mi] = [m[1], m[2], m[3], m[4], m[5]].map(Number);
     const wall = Date.UTC(y, mo - 1, d, hh, mi, 0);
-    let utc = wall - tzOffsetMs(ZONE, wall);
-    const off2 = tzOffsetMs(ZONE, utc);
+    let utc = wall - tzOffsetMs(z, wall);
+    const off2 = tzOffsetMs(z, utc);
     if (off2 !== wall - utc) utc = wall - off2;
-    const p = partsIn(ZONE, utc);
+    const p = partsIn(z, utc);
     if (p.year !== y || p.month !== mo || p.day !== d || p.hour !== hh || p.minute !== mi) {
       return { error: 'That time does not exist (the clocks change then).' };
     }
     return { value: new Date(utc).toISOString() };
   }
 
-  /** UTC ISO -> "YYYY-MM-DDTHH:MM" in IST wall-clock time, for <input type="datetime-local">. */
-  function isoToZoneInput(iso) {
+  /** UTC ISO -> "YYYY-MM-DDTHH:MM" in zone `tz` (default: the current zone), for <input type="datetime-local">. */
+  function isoToZoneInput(iso, tz) {
     const ms = Date.parse(iso);
     if (Number.isNaN(ms)) return '';
-    const p = partsIn(ZONE, ms);
+    const p = partsIn(tz || zone.tz, ms);
     return `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}`;
+  }
+
+  /** A typed datetime-local value, moved from one zone to another (same instant). Empty or invalid stays as it is. */
+  function convertInputZone(str, fromTz, toTz) {
+    const r = zoneInputToIso(str, fromTz);
+    return r.error ? str : isoToZoneInput(r.value, toTz);
   }
 
   function tzAbbr(tz, ms) {
@@ -82,14 +96,15 @@
 
   /** "Fri 6 Nov, 09:12:03 GMT · 09:12:03 UTC" for tooltips. */
   function fullStamp(ms) {
-    return `${fmtDay(ZONE, ms)}, ${fmtHMS(ZONE, ms)} ${ZONE_LABEL} · ${fmtDay('UTC', ms)}, ${fmtHMS('UTC', ms)} UTC · ${fmtHMS(UK, ms)} UK`;
+    const o = otherZone(zone);
+    return `${fmtDay(zone.tz, ms)}, ${fmtHMS(zone.tz, ms)} ${zone.label} · ${fmtDay('UTC', ms)}, ${fmtHMS('UTC', ms)} UTC · ${fmtHMS(o.tz, ms)} ${o.label}`;
   }
 
   function localTzName() {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; }
   }
   const LOCAL_TZ = localTzName();
-  const LOCAL_DIFFERS = LOCAL_TZ && LOCAL_TZ !== ZONE && LOCAL_TZ !== 'Asia/Calcutta';
+  const localDiffers = () => Boolean(LOCAL_TZ) && LOCAL_TZ !== zone.tz && !(zone.id === 'ist' && LOCAL_TZ === 'Asia/Calcutta');
 
   function fmtDuration(ms) {
     if (ms < 0) ms = 0;
@@ -105,7 +120,7 @@
 
   // Node-only hook so the time helpers can be unit-checked: node -e "require('./public/app.js')"
   if (!IS_BROWSER) {
-    if (typeof module !== 'undefined') module.exports = { zoneInputToIso, isoToZoneInput, tzOffsetMs, partsIn, fmtDuration };
+    if (typeof module !== 'undefined') module.exports = { ZONES, zoneById, otherZone, zoneInputToIso, isoToZoneInput, convertInputZone, tzOffsetMs, partsIn, fmtDuration };
     return;
   }
 
@@ -126,6 +141,11 @@
     return mqDark && mqDark.matches ? 'dark' : 'light';
   }
   applyTheme(storedTheme());
+
+  const ZONE_KEY = 'goldenTray.zone';
+  function storedZone() { try { return localStorage.getItem(ZONE_KEY); } catch (e) { return null; } }
+  function storeZone(id) { try { localStorage.setItem(ZONE_KEY, id); } catch (e) { /* ignore */ } }
+  zone = zoneById(storedZone());
 
   // ================================================================ DOM helpers
 
@@ -502,7 +522,7 @@
       el.title = state.connError;
       el.classList.add('is-bad');
     } else if (state.lastOkAt) {
-      el.textContent = `Updated ${fmtHMS(ZONE, state.lastOkAt + state.serverOffset)}`;
+      el.textContent = `Updated ${fmtHMS(zone.tz, state.lastOkAt + state.serverOffset)}`;
       el.title = fullStamp(state.lastOkAt + state.serverOffset);
       el.classList.remove('is-bad');
     }
@@ -573,12 +593,13 @@
     pill.textContent = stateName === 'open' ? 'Open' : stateName === 'not_started' ? 'Not started' : 'Ended';
     $('#window-countdown').textContent = stateName === 'open' ? `Ends in ${fmtDuration(wt.endsAt - now)}`
       : stateName === 'not_started' ? `Starts in ${fmtDuration(wt.startsAt - now)}` : '';
-    const istText = rangeText(ZONE, wt.startsAt, wt.endsAt, ZONE_LABEL);
+    const istText = rangeText(zone.tz, wt.startsAt, wt.endsAt, zone.label);
     const utcText = rangeText('UTC', wt.startsAt, wt.endsAt, 'UTC');
-    const ukText = `${fmtHM(UK, wt.startsAt)}–${fmtHM(UK, wt.endsAt)} UK`;
+    const o = otherZone(zone);
+    const ukText = `${fmtHM(o.tz, wt.startsAt)}–${fmtHM(o.tz, wt.endsAt)} ${o.label}`;
     if ($('#window-times').textContent !== istText) $('#window-times').textContent = istText;
     let extra = `${utcText} · ${ukText}`;
-    if (LOCAL_DIFFERS) extra += ` · ${fmtHM(null, wt.startsAt)}–${fmtHM(null, wt.endsAt)} your computer (${tzAbbr(null, wt.startsAt)})`;
+    if (localDiffers()) extra += ` · ${fmtHM(null, wt.startsAt)}–${fmtHM(null, wt.endsAt)} your computer (${tzAbbr(null, wt.startsAt)})`;
     if ($('#window-times-utc').textContent !== extra) $('#window-times-utc').textContent = extra;
   }
 
@@ -674,7 +695,7 @@
     $('#odds-pct').textContent = n ? `= ${fmtPct(p.probabilityPct != null ? p.probabilityPct : 100 / n)} chance per eligible order` : '';
     const wt = windowTimes();
     $('#pacing-basis').textContent = p.projectedWinners != null && wt
-      ? `≈ ${fmtInt(p.projectedWinners)} winners expected by ${fmtHM(ZONE, wt.endsAt)} IST at the current odds`
+      ? `≈ ${fmtInt(p.projectedWinners)} winners expected by ${fmtHM(zone.tz, wt.endsAt)} ${zone.label} at the current odds`
       : '';
 
     renderForm($('#n-form'), set);
@@ -890,8 +911,9 @@
       const r = zoneInputToIso(el.value);
       if (r.error) { hint.textContent = el.value ? r.error : ''; continue; }
       const ms = Date.parse(r.value);
-      let t = `= ${fmtDay('UTC', ms)} ${fmtHM('UTC', ms)} UTC · ${fmtHM(UK, ms)} UK`;
-      if (LOCAL_DIFFERS) t += ` · ${fmtDay(null, ms)} ${fmtHM(null, ms)} your computer`;
+      const o = otherZone(zone);
+      let t = `= ${fmtDay('UTC', ms)} ${fmtHM('UTC', ms)} UTC · ${fmtHM(o.tz, ms)} ${o.label}`;
+      if (localDiffers()) t += ` · ${fmtDay(null, ms)} ${fmtHM(null, ms)} your computer`;
       hint.textContent = t;
     }
   }
@@ -968,7 +990,7 @@
     const summary = h('dl', { class: 'summary-list' },
       h('dt', null, 'Odds'), h('dd', null, `1 in ${fmtInt(set.oneInN)} (${fmtPct(100 / set.oneInN)})`),
       h('dt', null, 'Cap'), h('dd', null, `${fmtInt(set.cap)} trays (${fmtInt((st.counts.live && st.counts.live.won) || 0)} given so far)`),
-      h('dt', null, 'Window (IST)'), h('dd', null, wt ? rangeText(ZONE, wt.startsAt, wt.endsAt, ZONE_LABEL) : '–'),
+      h('dt', null, `Window (${zone.label})`), h('dd', null, wt ? rangeText(zone.tz, wt.startsAt, wt.endsAt, zone.label) : '–'),
       h('dt', null, 'Window (UTC)'), h('dd', null, wt ? rangeText('UTC', wt.startsAt, wt.endsAt, 'UTC') : '–'),
       h('dt', null, 'Window now'), h('dd', null, wstate),
       h('dt', null, 'Tray SKU'), h('dd', null, set.traySku || '–'),
@@ -1089,13 +1111,13 @@
 
     // x ticks on IST whole hours
     const hourStep = plotW < 380 ? 3 : plotW < 700 ? 2 : 1;
-    const zoneOffset = tzOffsetMs(ZONE, s0);
+    const zoneOffset = tzOffsetMs(zone.tz, s0);
     let t = Math.ceil((s0 + zoneOffset) / 3600000) * 3600000 - zoneOffset;
     for (; t <= e0; t += 3600000) {
-      const hr = partsIn(ZONE, t).hour;
+      const hr = partsIn(zone.tz, t).hour;
       if (hr % hourStep !== 0) continue;
       const xx = x(t);
-      svgEl.append(s('text', { class: 'axis-text', x: xx, y: y2 + botH + 16, 'text-anchor': 'middle' }, fmtHM(ZONE, t)));
+      svgEl.append(s('text', { class: 'axis-text', x: xx, y: y2 + botH + 16, 'text-anchor': 'middle' }, fmtHM(zone.tz, t)));
     }
     svgEl.append(s('line', { class: 'baseline', x1: M.l, x2: M.l + plotW, y1: y1(0), y2: y1(0) }));
     svgEl.append(s('line', { class: 'baseline', x1: M.l, x2: M.l + plotW, y1: yb(0), y2: yb(0) }));
@@ -1138,7 +1160,7 @@
       svgEl.append(s('text', { class: 'label-win', x: right ? lx + 8 : lx - 8, y: ly - 8, 'text-anchor': right ? 'start' : 'end' }, fmtInt(last[1])));
     } else {
       svgEl.append(s('text', { class: 'axis-text', x: M.l + plotW / 2, y: M.t + topH / 2, 'text-anchor': 'middle' },
-        nowMs < s0 ? `No data yet. The window opens ${fmtDay(ZONE, s0)} ${fmtHM(ZONE, s0)} IST.` : 'No data yet.'));
+        nowMs < s0 ? `No data yet. The window opens ${fmtDay(zone.tz, s0)} ${fmtHM(zone.tz, s0)} ${zone.label}.` : 'No data yet.'));
     }
 
     // now marker
@@ -1189,7 +1211,7 @@
     const row = (keyCls, label, val) => h('div', { class: 'tip-row' },
       h('span', null, keyCls ? h('span', { class: `key ${keyCls}`, 'aria-hidden': 'true' }) : null, label), h('strong', null, val));
     clear(tip).append(
-      h('div', { class: 'tip-title' }, `${fmtHM(ZONE, b.start)}–${fmtHM(ZONE, b.end)} IST`),
+      h('div', { class: 'tip-title' }, `${fmtHM(zone.tz, b.start)}–${fmtHM(zone.tz, b.end)} ${zone.label}`),
       h('div', { class: 'small muted' }, `${fmtHM('UTC', b.start)}–${fmtHM('UTC', b.end)} UTC`),
       row('key-line key-win', 'Winners so far', fmtInt(b.cum)),
       row('key-line key-ideal', 'Ideal', b.ideal == null ? '–' : fmtInt(b.ideal)),
@@ -1216,7 +1238,7 @@
     if (!buckets.length) { body.append(h('tr', null, h('td', { colspan: 5, class: 'muted' }, 'No buckets yet.'))); return; }
     for (const b of buckets.slice().reverse()) {
       body.append(h('tr', null,
-        h('td', null, `${fmtHM(ZONE, b.start)}–${fmtHM(ZONE, b.end)}`),
+        h('td', null, `${fmtHM(zone.tz, b.start)}–${fmtHM(zone.tz, b.end)}`),
         h('td', { class: 'num' }, fmtInt(b.eligible)),
         h('td', { class: 'num' }, fmtInt(b.winners)),
         h('td', { class: 'num' }, fmtInt(b.cum)),
@@ -1239,7 +1261,7 @@
   function timeCell(iso) {
     const ms = Date.parse(iso);
     if (!iso || Number.isNaN(ms)) return h('td', null, '–');
-    const label = sameDay(ZONE, ms, serverNow()) ? fmtHMS(ZONE, ms) : `${fmtDay(ZONE, ms)} ${fmtHM(ZONE, ms)}`;
+    const label = sameDay(zone.tz, ms, serverNow()) ? fmtHMS(zone.tz, ms) : `${fmtDay(zone.tz, ms)} ${fmtHM(zone.tz, ms)}`;
     return h('td', { title: fullStamp(ms) }, h('time', { datetime: iso }, label));
   }
 
@@ -1417,7 +1439,7 @@
   function renderSetupSummary(st) {
     const setup = st.setup || {};
     const el = clear($('#setup-summary'));
-    const when = setup.checkedAt ? ` (checked ${fmtHM(ZONE, Date.parse(setup.checkedAt))} IST)` : '';
+    const when = setup.checkedAt ? ` (checked ${fmtHM(zone.tz, Date.parse(setup.checkedAt))} ${zone.label})` : '';
     if (setup.ok === true) el.append(h('span', { class: 'ok-text' }, 'All checks passed'), when);
     else if (setup.ok === false) el.append(h('span', { class: 'bad-text' }, `${(setup.problems || []).length || 'Some'} problem${(setup.problems || []).length === 1 ? '' : 's'}`), when);
     else el.append(h('span', { class: 'muted' }, 'Not checked yet.'));
@@ -1479,7 +1501,7 @@
     const d = serverNow() - ms;
     if (d < 60000) return `${Math.max(0, Math.round(d / 1000))}s ago`;
     if (d < 3600000) return `${Math.round(d / 60000)} min ago`;
-    return `${fmtDay(ZONE, ms)} ${fmtHM(ZONE, ms)} IST`;
+    return `${fmtDay(zone.tz, ms)} ${fmtHM(zone.tz, ms)} ${zone.label}`;
   }
 
   function renderSystem(st) {
@@ -1493,7 +1515,7 @@
       b.lastError ? ['Backfill error', b.lastError] : null,
       ['Store', sh.store || '–'],
       ['Shopify API', `${sh.apiVersion || '–'} · ${sh.authMode === 'client_credentials' ? 'client credentials' : sh.authMode || '–'}`],
-      ['Server time', `${fmtHMS(ZONE, serverNow())} IST · ${fmtHMS('UTC', serverNow())} UTC`],
+      ['Server time', `${fmtHMS(zone.tz, serverNow())} ${zone.label} · ${fmtHMS('UTC', serverNow())} UTC`],
     ].filter(Boolean);
     const dl = clear($('#system'));
     for (const [k, v] of rows) dl.append(h('dt', null, k), h('dd', { class: k === 'Backfill error' ? 'bad-text' : null }, v));
@@ -1611,7 +1633,7 @@
         h('div', null,
           h('div', { class: 'feed-meta' },
             h('span', { class: 'visually-hidden' }, `${level}: `),
-            Number.isNaN(ms) ? null : h('time', { datetime: ev.at, title: fullStamp(ms) }, sameDay(ZONE, ms, serverNow()) ? fmtHMS(ZONE, ms) : `${fmtDay(ZONE, ms)} ${fmtHM(ZONE, ms)}`),
+            Number.isNaN(ms) ? null : h('time', { datetime: ev.at, title: fullStamp(ms) }, sameDay(zone.tz, ms, serverNow()) ? fmtHMS(zone.tz, ms) : `${fmtDay(zone.tz, ms)} ${fmtHM(zone.tz, ms)}`),
             ev.type ? h('span', { class: 'feed-type' }, humanize(ev.type)) : null,
             eventOrderLink(ev),
             actor ? h('span', { class: 'feed-actor' }, `by ${actor}`) : null),
@@ -1622,6 +1644,46 @@
     older.hidden = state.events.length === 0;
     if (!older.classList.contains('is-busy')) older.disabled = state.eventsDone;
     older.textContent = state.eventsDone ? 'No older events' : 'Load older';
+  }
+
+  // ================================================================ time zone switch
+
+  /** Labels that are static in the HTML: column titles, field labels, the note above the window fields. */
+  function applyZoneLabels() {
+    const o = otherZone(zone);
+    for (const el of $$('.zl')) el.textContent = zone.label;
+    const note = $('#tz-note');
+    if (note) note.textContent = `Enter times in ${zone.name}. The UTC time and the ${o.label} time are shown under each field.`;
+    for (const b of $$('.zone-btn')) b.setAttribute('aria-pressed', b.dataset.zone === zone.id ? 'true' : 'false');
+  }
+
+  /** Time fields the admin has typed but not saved keep meaning the same moment in the new zone. */
+  function convertDatetimeInputs(fromTz, toTz) {
+    for (const el of $$('[data-type="datetime"]')) {
+      if (el.dataset.base !== undefined) el.dataset.base = convertInputZone(el.dataset.base, fromTz, toTz);
+      el.value = convertInputZone(el.value, fromTz, toTz);
+    }
+  }
+
+  function setZone(id) {
+    const next = zoneById(id);
+    if (next === zone) return;
+    convertDatetimeInputs(zone.tz, next.tz);
+    zone = next;
+    storeZone(zone.id);
+    applyZoneLabels();
+    if (!state.me) return;
+    // The tables skip a redraw when their data is unchanged; the times they show are not part of the data.
+    state.winnersSig = '';
+    state.orders.sig = '';
+    state.eventsSig = '';
+    renderStatus();
+    renderChart();
+    renderWinners();
+    renderOrders();
+    renderEvents(new Set());
+    renderSetupResult();
+    updateTzHints();
   }
 
   // ================================================================ init
@@ -1644,6 +1706,9 @@
     });
     if (mqDark && mqDark.addEventListener) mqDark.addEventListener('change', updateThemeButton);
     updateThemeButton();
+
+    for (const b of $$('.zone-btn')) b.addEventListener('click', () => setZone(b.dataset.zone));
+    applyZoneLabels();
 
     $('#mode-switch').addEventListener('click', onModeClick);
 
