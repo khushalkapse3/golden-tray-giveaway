@@ -1,0 +1,35 @@
+# Render blueprint. Needs a paid instance (always on) and a disk for the SQLite file.
+# A disk also means Render runs one instance only, which the cap relies on.
+services:
+  - type: web
+    name: golden-tray
+    runtime: node
+    plan: starter
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22.13.0
+      - key: DATA_DIR
+        value: /var/data
+      - key: SHOPIFY_DOMAIN
+        sync: false
+      - key: SHOPIFY_CLIENT_ID
+        sync: false
+      - key: SHOPIFY_CLIENT_SECRET
+        sync: false
+      - key: SHOPIFY_ACCESS_TOKEN
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: PUBLIC_URL
+        sync: false
+    disk:
+      name: golden-tray-data
+      mountPath: /var/data
+      sizeGB: 1
