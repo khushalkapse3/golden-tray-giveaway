@@ -17,9 +17,9 @@ const RULES = Object.freeze({
   maxWaitSeconds: 180,
   // linc-app only re-routes an updated order once it has one of these tags
   // (linc-app src/queues/processors/routing.js, "hasPartnerTags").
-  routedTags: Object.freeze(['Linc Manual', 'Linc Queue', 'Wonderpack Fulfilment Queue', 'Wonderpack Helm Queue', 'Synergy Fulfilment Queue', 'ILG Fulfilment Queue', 'ShipHero Queue']),
+  routedTags: Object.freeze(['Linc Manual', 'Linc Queue', 'ILG Fulfilment Queue', 'ShipHero Queue']),
   // Tags linc-app adds when an order is handed to a warehouse (linc-app src/constants.js PARTNERS).
-  releasedTags: Object.freeze(['Linc', 'ILG_RELEASED', 'Synergy Fulfilment', 'Wonderpack Fulfilment']),
+  releasedTags: Object.freeze(['Linc', 'ILG_RELEASED']),
 });
 
 // Waits between tray attempts when one fails for a reason that may pass (network, 5xx, throttle).

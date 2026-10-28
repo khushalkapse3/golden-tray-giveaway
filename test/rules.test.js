@@ -7,8 +7,11 @@ const { RULES, AWARD_BACKOFF_SECONDS, MAX_AWARD_ATTEMPTS, RELEASE_SAFETY_LIMIT_S
 test('fixed rules: 60 s delay, 3 min max wait, linc-app tags', () => {
   assert.equal(RULES.delaySeconds, 60);
   assert.equal(RULES.maxWaitSeconds, 180);
-  assert.deepEqual(RULES.routedTags, ['Linc Manual', 'Linc Queue', 'Wonderpack Fulfilment Queue', 'Wonderpack Helm Queue', 'Synergy Fulfilment Queue', 'ILG Fulfilment Queue', 'ShipHero Queue']);
-  assert.deepEqual(RULES.releasedTags, ['Linc', 'ILG_RELEASED', 'Synergy Fulfilment', 'Wonderpack Fulfilment']);
+  assert.deepEqual(RULES.routedTags, ['Linc Manual', 'Linc Queue', 'ILG Fulfilment Queue', 'ShipHero Queue']);
+  assert.deepEqual(RULES.releasedTags, ['Linc', 'ILG_RELEASED']);
+  for (const gone of ['Wonderpack Fulfilment Queue', 'Wonderpack Helm Queue', 'Synergy Fulfilment Queue', 'Synergy Fulfilment', 'Wonderpack Fulfilment']) {
+    assert.equal(RULES.routedTags.includes(gone) || RULES.releasedTags.includes(gone), false, `${gone} is not a rule any more`);
+  }
 });
 
 test('timing budget: even the worst case ends at least 2 minutes before Linc releases an order (10 min)', () => {

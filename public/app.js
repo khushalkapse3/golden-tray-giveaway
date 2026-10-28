@@ -85,10 +85,6 @@
     return r.error ? str : isoToZoneInput(r.value, toTz);
   }
 
-  function tzAbbr(tz, ms) {
-    const part = dtf(tz, { timeZoneName: 'short', hour: 'numeric' }).formatToParts(new Date(ms)).find((x) => x.type === 'timeZoneName');
-    return part ? part.value : '';
-  }
   const fmtHM = (tz, ms) => dtf(tz, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms));
   const fmtHMS = (tz, ms) => dtf(tz, { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(new Date(ms));
   const fmtDay = (tz, ms) => dtf(tz, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(ms));
@@ -99,12 +95,6 @@
     const o = otherZone(zone);
     return `${fmtDay(zone.tz, ms)}, ${fmtHMS(zone.tz, ms)} ${zone.label} · ${fmtDay('UTC', ms)}, ${fmtHMS('UTC', ms)} UTC · ${fmtHMS(o.tz, ms)} ${o.label}`;
   }
-
-  function localTzName() {
-    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; }
-  }
-  const LOCAL_TZ = localTzName();
-  const localDiffers = () => Boolean(LOCAL_TZ) && LOCAL_TZ !== zone.tz && !(zone.id === 'ist' && LOCAL_TZ === 'Asia/Calcutta');
 
   function fmtDuration(ms) {
     if (ms < 0) ms = 0;
@@ -599,7 +589,6 @@
     const ukText = `${fmtHM(o.tz, wt.startsAt)}–${fmtHM(o.tz, wt.endsAt)} ${o.label}`;
     if ($('#window-times').textContent !== istText) $('#window-times').textContent = istText;
     let extra = `${utcText} · ${ukText}`;
-    if (localDiffers()) extra += ` · ${fmtHM(null, wt.startsAt)}–${fmtHM(null, wt.endsAt)} your computer (${tzAbbr(null, wt.startsAt)})`;
     if ($('#window-times-utc').textContent !== extra) $('#window-times-utc').textContent = extra;
   }
 
@@ -913,7 +902,6 @@
       const ms = Date.parse(r.value);
       const o = otherZone(zone);
       let t = `= ${fmtDay('UTC', ms)} ${fmtHM('UTC', ms)} UTC · ${fmtHM(o.tz, ms)} ${o.label}`;
-      if (localDiffers()) t += ` · ${fmtDay(null, ms)} ${fmtHM(null, ms)} your computer`;
       hint.textContent = t;
     }
   }

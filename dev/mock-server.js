@@ -60,9 +60,8 @@ const settings = {
   qualifyingSkus: ['FG1527d_V1'],
   tag: 'GoldenTrayNov2026',
   allowedCountries: ['GB', 'GG', 'JE', 'IM'],
-  routedTags: ['Linc Manual', 'Linc Queue', 'Wonderpack Fulfilment Queue', 'Wonderpack Helm Queue',
-    'Synergy Fulfilment Queue', 'ILG Fulfilment Queue', 'ShipHero Queue'],
-  releasedTags: ['Linc', 'ILG_RELEASED', 'Synergy Fulfilment', 'Wonderpack Fulfilment'],
+  routedTags: ['Linc Manual', 'Linc Queue', 'ILG Fulfilment Queue', 'ShipHero Queue'],
+  releasedTags: ['Linc', 'ILG_RELEASED'],
   discountDescription: 'Golden tray: free gift',
 };
 const LOCKED = ['traySku', 'trayVariantId', 'qualifyingSkus', 'tag', 'allowedCountries', 'routedTags', 'releasedTags'];
