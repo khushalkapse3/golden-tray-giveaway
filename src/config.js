@@ -13,12 +13,18 @@ function cleanDomain(value) {
 function loadConfig(env = process.env) {
   const domain = cleanDomain(env.SHOPIFY_DOMAIN);
   const { rules, errors: ruleErrors } = rulesFromEnv(env);
+  const dataDir = path.resolve(env.DATA_DIR || path.join(__dirname, '..', 'data'));
+  const databaseUrl = String(env.DATABASE_URL || '').trim() || `file:${path.join(dataDir, 'golden-tray.db')}`;
+  const remote = !databaseUrl.startsWith('file:') && databaseUrl !== ':memory:';
+  // The heavy dashboard reads are reused for a few seconds on a hosted database (free-plan row budget).
+  const cacheMs = Math.min(Math.max(env.READ_CACHE_MS !== undefined && env.READ_CACHE_MS !== '' ? parseInt(env.READ_CACHE_MS, 10) || 0 : (remote ? 8000 : 0), 0), 60000);
   return {
+    database: { url: databaseUrl, authToken: env.DATABASE_AUTH_TOKEN || '', cacheMs },
     rules,
     ruleErrors,
     env: env.NODE_ENV || 'development',
     port: parseInt(env.PORT, 10) || 3100,
-    dataDir: path.resolve(env.DATA_DIR || path.join(__dirname, '..', 'data')),
+    dataDir,
     publicUrl: String(env.PUBLIC_URL || '').trim().replace(/\/+$/, ''),
     adminPassword: env.ADMIN_PASSWORD || '',
     adminToken: env.ADMIN_TOKEN || '',
@@ -42,7 +48,7 @@ function loadConfig(env = process.env) {
     },
     worker: {
       tickMs: parseInt(env.WORKER_TICK_MS, 10) || 2000,
-      concurrency: parseInt(env.WORKER_CONCURRENCY, 10) || 2,
+      concurrency: Math.min(parseInt(env.WORKER_CONCURRENCY, 10) || 6, 20),
       // How often the backfill looks for orders the webhook missed (floor 5 s).
       backfillMs: Math.max(parseInt(env.BACKFILL_INTERVAL_MS, 10) || 180000, 5000),
     },
@@ -60,6 +66,11 @@ function checkConfig(config) {
     errors.push('Set SHOPIFY_ACCESS_TOKEN, or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET');
   }
   if (!config.adminPassword) errors.push('ADMIN_PASSWORD is required (dashboard login)');
+  const dbUrl = config.database.url;
+  const dbRemote = !dbUrl.startsWith('file:') && dbUrl !== ':memory:';
+  if (!/^(libsql|https?|wss?|file):/.test(dbUrl) && dbUrl !== ':memory:') errors.push('DATABASE_URL must start with libsql:// (Turso), file: or be :memory:');
+  else if (dbRemote && !config.database.authToken) errors.push('DATABASE_AUTH_TOKEN is required with a Turso DATABASE_URL');
+  if (!dbRemote && config.env === 'production') warnings.push('The database is a local file: it is lost on every deploy unless a persistent disk is attached. Use DATABASE_URL=libsql://... (Turso) instead.');
   if (config.shopify.baseUrl && config.env === 'production') errors.push('SHOPIFY_BASE_URL is for local testing only; remove it in production');
   if (config.shopify.baseUrl) warnings.push(`Talking to a FAKE Shopify at ${config.shopify.baseUrl} (SHOPIFY_BASE_URL)`);
   if (!config.shopify.webhookSecret) {

@@ -40,7 +40,7 @@ Mutations must send `Content-Type: application/json`. Times are ISO-8601 UTC str
     "expectedRemainingOrders": 8040, "projectedWinners": 490,
     "traysLeft": 412
   },
-  "worker":   { "running": true, "lastTickAt": "...", "queued": 3, "awarding": 0, "tagRetriesPending": 0 },
+  "worker":   { "running": true, "leader": true, "instance": "a1b2c3d4", "lastTickAt": "...", "queued": 3, "awarding": 0, "tagRetriesPending": 0 },
   "backfill": { "lastRunAt": "...", "lastFound": 0, "lastError": null },
   "shopify":  { "store": "staging-purdy-global.myshopify.com", "adminOrdersUrl": "https://admin.shopify.com/store/staging-purdy-global/orders/",
                 "apiVersion": "2026-10", "authMode": "token | client_credentials" },

@@ -56,3 +56,49 @@ test('rules: defaults, env overrides, and bad values are startup errors', () => 
   const worse = loadConfig({ SHOPIFY_DOMAIN: 's.myshopify.com', SHOPIFY_ACCESS_TOKEN: 't', ADMIN_PASSWORD: 'p', DELAY_SECONDS: 'x' });
   assert.ok(checkConfig(worse).errors.some((e) => /DELAY_SECONDS/.test(e)));
 });
+
+// --- database ----------------------------------------------------------------------------------
+
+const base = { SHOPIFY_DOMAIN: 's.myshopify.com', SHOPIFY_ACCESS_TOKEN: 't', ADMIN_PASSWORD: 'p' };
+
+test('database: defaults to a local file under DATA_DIR; Turso comes from DATABASE_URL + DATABASE_AUTH_TOKEN', () => {
+  const d = loadConfig({ DATA_DIR: '/tmp/gt-data' });
+  assert.equal(d.database.url, 'file:/tmp/gt-data/golden-tray.db');
+  assert.equal(d.database.authToken, '');
+  const t = loadConfig({ DATABASE_URL: ' libsql://gt-khushal.turso.io ', DATABASE_AUTH_TOKEN: 'tok' });
+  assert.equal(t.database.url, 'libsql://gt-khushal.turso.io');
+  assert.equal(t.database.authToken, 'tok');
+});
+
+test('database: a Turso URL without a token is a startup error; a bad scheme too', () => {
+  const noToken = checkConfig(loadConfig({ ...base, DATABASE_URL: 'libsql://x.turso.io' }));
+  assert.ok(noToken.errors.some((e) => /DATABASE_AUTH_TOKEN/.test(e)));
+  const bad = checkConfig(loadConfig({ ...base, DATABASE_URL: 'postgres://x/y' }));
+  assert.ok(bad.errors.some((e) => /DATABASE_URL/.test(e)));
+  const ok = checkConfig(loadConfig({ ...base, DATABASE_URL: 'libsql://x.turso.io', DATABASE_AUTH_TOKEN: 'tok' }));
+  assert.deepEqual(ok.errors, []);
+});
+
+test('database: a local file in production is a warning (it is lost on every deploy without a disk)', () => {
+  const prodFile = checkConfig(loadConfig({ ...base, NODE_ENV: 'production' }));
+  assert.ok(prodFile.warnings.some((w) => /disk|deploy/i.test(w)));
+  const prodTurso = checkConfig(loadConfig({ ...base, NODE_ENV: 'production', DATABASE_URL: 'libsql://x.turso.io', DATABASE_AUTH_TOKEN: 't' }));
+  assert.ok(!prodTurso.warnings.some((w) => /disk|deploy/i.test(w)));
+  const devFile = checkConfig(loadConfig({ ...base, NODE_ENV: 'development' }));
+  assert.ok(!devFile.warnings.some((w) => /disk|deploy/i.test(w)));
+});
+
+test('read cache: 8 s by default for a remote database, 0 for a local file; READ_CACHE_MS overrides it', () => {
+  assert.equal(loadConfig({ DATABASE_URL: 'libsql://x.turso.io', DATABASE_AUTH_TOKEN: 't' }).database.cacheMs, 8000);
+  assert.equal(loadConfig({}).database.cacheMs, 0);
+  assert.equal(loadConfig({ READ_CACHE_MS: '3000' }).database.cacheMs, 3000);
+  assert.equal(loadConfig({ DATABASE_URL: 'libsql://x.turso.io', DATABASE_AUTH_TOKEN: 't', READ_CACHE_MS: '0' }).database.cacheMs, 0);
+  assert.equal(loadConfig({ READ_CACHE_MS: '999999' }).database.cacheMs, 60000, 'capped at one minute');
+});
+
+test('worker concurrency: 6 by default (most orders lose their roll and never call Shopify), env can change it', () => {
+  assert.equal(loadConfig({}).worker.concurrency, 6);
+  assert.equal(loadConfig({ WORKER_CONCURRENCY: '3' }).worker.concurrency, 3);
+  assert.equal(loadConfig({ WORKER_CONCURRENCY: '0' }).worker.concurrency, 6, '0 or junk falls back to the default');
+  assert.equal(loadConfig({ WORKER_CONCURRENCY: '500' }).worker.concurrency, 20, 'capped so Shopify is not flooded');
+});

@@ -55,7 +55,7 @@ function createApp({ engine, config, logger, clock = () => new Date() }) {
   app.get('/health', (req, res) => res.json({ ok: true }));
 
   // --- Shopify webhook (HMAC over the raw body) --------------------------------------------
-  app.post('/webhooks/orders/create', express.raw({ type: () => true, limit: '5mb' }), (req, res) => {
+  app.post('/webhooks/orders/create', express.raw({ type: () => true, limit: '5mb' }), async (req, res) => {
     const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     if (!verifyHmac(body, req.get('x-shopify-hmac-sha256'), config.shopify.webhookSecret)) {
       logger.warn('webhook rejected: bad HMAC', { shop: req.get('x-shopify-shop-domain') });
@@ -67,7 +67,7 @@ function createApp({ engine, config, logger, clock = () => new Date() }) {
     let payload;
     try { payload = JSON.parse(body.toString('utf8')); } catch { return res.status(400).json({ error: 'invalid_json' }); }
     try {
-      const result = engine.receiveWebhook(payload);
+      const result = await engine.receiveWebhook(payload);
       return res.json({ ok: true, ...result });
     } catch (error) {
       // 500 makes Shopify retry the delivery later.
@@ -85,6 +85,7 @@ function createApp({ engine, config, logger, clock = () => new Date() }) {
 
   // --- API -----------------------------------------------------------------------------------
   const api = express.Router();
+  const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
   api.use((req, res, next) => {
     res.set('Cache-Control', 'no-store');
     // JSON only: a cross-site HTML form can not send application/json.
@@ -93,7 +94,7 @@ function createApp({ engine, config, logger, clock = () => new Date() }) {
   });
   api.use(express.json({ limit: '100kb' }));
 
-  api.post('/login', (req, res) => {
+  api.post('/login', wrap(async (req, res) => {
     const ip = req.ip;
     if (auth.blocked(ip)) return res.status(429).json({ error: 'too_many_attempts' });
     const name = String(req.body?.name || '').trim().slice(0, 40);
@@ -102,10 +103,10 @@ function createApp({ engine, config, logger, clock = () => new Date() }) {
       auth.recordFailure(ip);
       return res.status(401).json({ error: 'bad_password' });
     }
-    store.addEvent({ type: 'login', actor: name, message: `${name} logged in` });
+    await store.addEvent({ type: 'login', actor: name, message: `${name} logged in` });
     res.set('Set-Cookie', auth.cookie(auth.issue(name), { secure: req.secure }));
     return res.json({ ok: true, name });
-  });
+  }));
 
   api.post('/logout', (req, res) => {
     res.set('Set-Cookie', auth.cookie('', { secure: req.secure, clear: true }));
@@ -113,36 +114,35 @@ function createApp({ engine, config, logger, clock = () => new Date() }) {
   });
 
   api.use(auth.requireAuth);
-  const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
 
   api.get('/me', (req, res) => res.json({ name: req.user }));
-  api.get('/status', (req, res) => res.json(engine.status()));
+  api.get('/status', wrap(async (req, res) => res.json(await engine.status())));
   api.patch('/settings', wrap(async (req, res) => {
     const { settings, warnings } = await engine.updateSettings(req.body, req.user);
     res.json({ settings, warnings });
   }));
-  api.get('/orders', (req, res) => {
-    const { total, items } = store.listOrders(req.query);
+  api.get('/orders', wrap(async (req, res) => {
+    const { total, items } = await store.listOrders(req.query);
     res.json({ total, items: items.map((r) => engine.toApiOrder(r)) });
-  });
-  api.get('/winners', (req, res) => {
-    res.json({ items: store.winners(req.query.mode === 'shadow' ? 'shadow' : 'live').map((r) => engine.toApiOrder(r)) });
-  });
-  api.get('/winners.csv', (req, res) => {
+  }));
+  api.get('/winners', wrap(async (req, res) => {
+    res.json({ items: (await store.winners(req.query.mode === 'shadow' ? 'shadow' : 'live')).map((r) => engine.toApiOrder(r)) });
+  }));
+  api.get('/winners.csv', wrap(async (req, res) => {
     const mode = req.query.mode === 'shadow' ? 'shadow' : 'live';
-    const rows = store.winners(mode).map((r) => [r.slot, r.name, r.id, r.created_at, r.tray_added_at, r.customer_id, r.customer_email, r.subtotal, r.tag_status]);
+    const rows = (await store.winners(mode)).map((r) => [r.slot, r.name, r.id, r.created_at, r.tray_added_at, r.customer_id, r.customer_email, r.subtotal, r.tag_status]);
     const stamp = clock().toISOString().slice(0, 16).replace(/[:T]/g, '-');
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="golden-tray-winners-${mode}-${stamp}.csv"`);
     res.send(toCsv([['slot', 'order', 'order_id', 'created_at', 'won_at', 'customer_id', 'customer_email', 'subtotal', 'tag_status'], ...rows]));
-  });
-  api.get('/timeline', (req, res) => res.json(engine.timeline(req.query.bucketMinutes)));
-  api.get('/events', (req, res) => {
-    const items = store.listEvents({ limit: req.query.limit, before: req.query.before }).map((e) => ({
+  }));
+  api.get('/timeline', wrap(async (req, res) => res.json(await engine.timeline(req.query.bucketMinutes))));
+  api.get('/events', wrap(async (req, res) => {
+    const items = (await store.listEvents({ limit: req.query.limit, before: req.query.before })).map((e) => ({
       id: e.id, at: e.at, level: e.level, type: e.type, orderId: e.order_id, orderName: e.order_name, actor: e.actor, message: e.message,
     }));
     res.json({ items });
-  });
+  }));
   api.post('/orders/check', wrap(async (req, res) => res.json(await engine.checkOrder(req.body?.order))));
   api.post('/orders/:id/retry', wrap(async (req, res) => res.json(await engine.retryOrder(req.params.id, req.user))));
   api.post('/orders/:id/retry-tags', wrap(async (req, res) => res.json(await engine.retryOrderTags(req.params.id, req.user))));

@@ -88,11 +88,17 @@ function fakeShopify() {
   return shop;
 }
 
-function makeEngine({ settings = {}, random, concurrency = 2, publicUrl = 'https://gt.example.com', rules } = {}) {
-  const store = new Store(':memory:', { seed: { traySku: 'GT-TRAY', trayVariantId: '42' } });
-  store.writeSettings({ ...store.getSettings(), mode: 'live', ...settings });
-  const shopify = fakeShopify();
-  const clock = { now: new Date(T0) };
+/**
+ * An engine on an in-memory store with a fake Shopify and a controllable clock. It is made the
+ * leader at once (the lease is what lets a copy of the app process orders). Pass `shared` (the ctx
+ * of another makeEngine call) to run a second engine on the same store, like a second app copy
+ * during a zero-downtime deploy.
+ */
+async function makeEngine({ settings = {}, random, concurrency = 2, publicUrl = 'https://gt.example.com', rules, shared, instanceId, leader = true } = {}) {
+  const store = shared ? shared.store : await Store.open(':memory:', { seed: { traySku: 'GT-TRAY', trayVariantId: '42' } });
+  if (!shared) await store.writeSettings({ ...(await store.getSettings()), mode: 'live', ...settings });
+  const shopify = shared ? shared.shopify : fakeShopify();
+  const clock = shared ? shared.clock : { now: new Date(T0) };
   const rolls = [];
   const engine = new Engine({
     store,
@@ -107,11 +113,14 @@ function makeEngine({ settings = {}, random, concurrency = 2, publicUrl = 'https
     random: (n) => { rolls.push(n); return random ? random(n) : 0; },
     logger: { info() {}, warn() {}, error() {} },
     authMode: 'token',
+    instanceId: instanceId || 'test-instance',
   });
+  if (leader) await engine.leadershipTick();
   const advance = (seconds) => { clock.now = new Date(clock.now.getTime() + seconds * 1000); };
-  /** Runs ticks until nothing is due or in flight. */
+  /** Runs ticks until nothing is due or in flight (renewing leadership like the real timer would). */
   const drain = async (maxTicks = 50) => {
     for (let i = 0; i < maxTicks; i += 1) {
+      if (leader) await engine.leadershipTick();
       const started = await engine.tick();
       if (!started) break;
     }

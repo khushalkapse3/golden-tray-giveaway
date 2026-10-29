@@ -2,21 +2,24 @@
   "name": "golden-tray",
   "version": "1.0.0",
   "private": true,
-  "description": "Standalone Shopify app: adds a free golden tray to N random qualifying orders, with a hard cap and an admin dashboard.",
+  "description": "Standalone Shopify app: adds a free golden tray to N random qualifying orders, with a hard cap and an admin dashboard. Data in Turso (libSQL).",
   "main": "src/server.js",
   "engines": {
-    "node": ">=22.13"
+    "node": ">=22"
   },
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning src/server.js",
-    "dev": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --watch src/server.js",
-    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "start": "node src/server.js",
+    "dev": "node --env-file-if-exists=.env --watch src/server.js",
+    "test": "node --test test/*.test.js",
     "validate:graphql": "node scripts/validate-graphql.js",
     "e2e": "node scripts/e2e-smoke.js",
     "fake-shopify": "node scripts/fake-shopify.js",
-    "mock-dashboard": "node dev/mock-server.js"
+    "mock-dashboard": "node dev/mock-server.js",
+    "load-test": "node scripts/load-test.js",
+    "check-db": "node --env-file-if-exists=.env scripts/check-database.js"
   },
   "dependencies": {
+    "@libsql/client": "0.18.0",
     "express": "4.21.2"
   }
 }

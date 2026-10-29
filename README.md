@@ -4,8 +4,9 @@ A small app that runs on its own. It gives a free golden tray to up to **N rando
 
 The design and the reasons behind it are in `../plan.md`. The HTTP API is in `API.md`.
 
-- **Runtime:** Node ≥ 22.13.
-- **Dependencies:** Express is the only one. SQLite comes built into Node (`node:sqlite`).
+- **Runtime:** Node ≥ 22.
+- **Dependencies:** Express and `@libsql/client`.
+- **Database:** a hosted **Turso** database (libSQL, free plan) in production. Locally, with `DATABASE_URL` empty, a plain file under `DATA_DIR`. Same SQL either way.
 - **Shopify:** GraphQL Admin API **2026-10**.
 
 ## How it works
@@ -76,13 +77,37 @@ npm run validate:graphql      # checks every GraphQL document against the 2026-1
    - the cap holds;
    - the winners list and the CSV are right.
 
+## Database
+
+- **Production: Turso, free plan** (500 M rows read and 10 M rows written a month, 5 GB). Create it once:
+  ```bash
+  turso db create golden-tray --location lhr   # a region near Render's
+  turso db show golden-tray --url              # → DATABASE_URL (libsql://...)
+  turso db tokens create golden-tray           # → DATABASE_AUTH_TOKEN
+  ```
+  Then check it before deploying: `DATABASE_URL=... DATABASE_AUTH_TOKEN=... npm run check-db`.
+- **Locally:** leave `DATABASE_URL` empty and the app uses `DATA_DIR/golden-tray.db`.
+- **How the cap stays exact without transactions:** taking a slot and handing out the next slot number are each **one SQL statement**, so no other request can get in between.
+- **Free-plan budget:** the dashboard's heavy reads (counts, chart, lists) are reused for 8 s (`READ_CACHE_MS`). Anything the giveaway decides on (winner count, slot claim, due orders) is never cached.
+
+## Running more than one copy
+
+During a zero-downtime deploy the old and new copies run at the same time. Only the copy holding the **leader lease** (a row in the database, renewed every 5 s, valid 20 s) processes orders and runs the backfill. Both copies still answer webhooks and the dashboard, because receiving an order is safe twice.
+
+On shutdown a copy finishes its in-flight awards, then gives the lease up, so the new copy takes over within a few seconds. If a copy crashes, its lease runs out after 20 s. The next leader then puts the crashed copy's unfinished awards back in the queue.
+
+## Capacity
+
+`npm run load-test` pushes orders through the real engine and store, with network delay added to every database and Shopify call. On 2026-10-29: 8,000 orders arriving at 25 a second (more than 100 times the real day's average), with the cap of 500 reached. See `../context.md` for the numbers.
+
 ## Deploy
 
-**Render:** use `render.yaml`. It needs a paid, always-on web service plus a 1 GB disk at `/var/data`. With a disk, Render runs only one instance, which the cap relies on. Don't deploy on the giveaway day, because a deploy restarts the app; backfill catches up after a restart.
+**Render:** use `render.yaml`.
+- It's a paid **Starter** web service. A free instance sleeps, which would stop the timers.
+- There's **no disk**, so Render keeps zero-downtime deploys.
+- Set `DATABASE_URL` and `DATABASE_AUTH_TOKEN` (Turso), plus the Shopify and admin variables.
 
-**Hetzner:** a small VPS running Node 22, with the app under systemd (`npm start`, `DATA_DIR=/var/lib/golden-tray`) and Caddy in front for HTTPS.
-
-Run **one** process only: SQLite and the cap expect a single writer.
+**Hetzner:** a small VPS running Node 22, with the app under systemd (`npm start`) and Caddy in front for HTTPS. Use the same Turso database, or leave `DATABASE_URL` empty for a local file.
 
 ## Files
 
@@ -90,12 +115,12 @@ Run **one** process only: SQLite and the cap expect a single writer.
 |---|---|
 | `src/server.js` | wiring and graceful shutdown |
 | `src/engine.js` | the giveaway: receive, roll, claim, award, tag, retry, backfill, auto-pace, setup check |
-| `src/store.js` | SQLite tables and the atomic cap claim |
+| `src/store.js` | database (Turso/libSQL): tables, the one-statement cap claim, leader lease, read cache |
 | `src/settings.js` | defaults, validation, live locks |
 | `src/eligibility.js` | prefilter (webhook copy) and fresh checks (before the edit) |
 | `src/pacing.js` | window maths, suggested N, timeline |
 | `src/shopify/` | GraphQL client (auth, retries), documents, operations |
 | `src/http/` | Express app, login and sessions |
 | `public/` | dashboard (vanilla JS, no CDN) |
-| `scripts/` | fake Shopify, e2e smoke test, GraphQL validation |
+| `scripts/` | fake Shopify, e2e smoke test, load test, database check, GraphQL validation |
 | `dev/mock-server.js` | dashboard with fake data, no backend needed |

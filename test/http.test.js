@@ -9,7 +9,7 @@ const { makeEngine, webhookPayload, freshOrder } = require('./helpers');
 const SECRET = 'whsec_test';
 
 async function start({ settings, password = 'pw', token = 'tok' } = {}) {
-  const ctx = makeEngine({ settings });
+  const ctx = await makeEngine({ settings });
   const config = {
     env: 'test', adminPassword: password, adminToken: token, sessionSecret: 'sess',
     shopify: { domain: 'shop.myshopify.com', webhookSecret: SECRET, adminStoreHandle: 'shop', apiVersion: '2026-10' },
@@ -110,7 +110,7 @@ test('PATCH /api/settings: 200 with the audit actor, 400 with the field, 409 whe
   assert.equal(ok.status, 200);
   assert.equal(ok.json.settings.oneInN, 25);
   assert.ok(Array.isArray(ok.json.warnings));
-  assert.equal(store.listEvents({ limit: 1 })[0].actor, 'Khushal');
+  assert.equal((await store.listEvents({ limit: 1 }))[0].actor, 'Khushal');
   const bad = await call('PATCH', '/api/settings', { body: { oneInN: 0 } });
   assert.deepEqual([bad.status, bad.json.error, bad.json.field], [400, 'invalid', 'oneInN']);
   const locked = await call('PATCH', '/api/settings', { body: { traySku: 'OTHER' } });
@@ -132,13 +132,13 @@ test('webhook: bad HMAC 401; good HMAC stores the order; other shops and topics 
   shopify.orders.set('1', freshOrder(1));
   const body = JSON.stringify(webhookPayload(1));
   assert.equal((await call('POST', '/webhooks/orders/create', { raw: body, headers: { ...webhookHeaders(body), 'X-Shopify-Hmac-Sha256': 'bad' }, auth: false })).status, 401);
-  assert.equal(store.getOrder('1'), undefined);
+  assert.equal((await store.getOrder('1')), undefined);
   assert.equal((await call('POST', '/webhooks/orders/create', { raw: body, headers: webhookHeaders(body, { 'X-Shopify-Shop-Domain': 'evil.myshopify.com' }), auth: false })).status, 403);
   assert.equal((await call('POST', '/webhooks/orders/create', { raw: body, headers: webhookHeaders(body, { 'X-Shopify-Topic': 'orders/paid' }), auth: false })).status, 200);
-  assert.equal(store.getOrder('1'), undefined);
+  assert.equal((await store.getOrder('1')), undefined);
   const ok = await call('POST', '/webhooks/orders/create', { raw: body, headers: webhookHeaders(body), auth: false });
   assert.equal(ok.status, 200);
-  assert.equal(store.getOrder('1').status, 'queued');
+  assert.equal((await store.getOrder('1')).status, 'queued');
 });
 
 test('orders, winners, CSV, events and timeline', async () => {
@@ -226,5 +226,5 @@ test('orders/updated is accepted and ignored (the shared ngrok URL receives both
   assert.equal((await call('POST', '/webhooks/orders/updated', { raw: body, headers: { ...webhookHeaders(body), 'X-Shopify-Topic': 'orders/updated', 'X-Shopify-Hmac-Sha256': 'bad' }, auth: false })).status, 401);
   const ok = await call('POST', '/webhooks/orders/updated', { raw: body, headers: webhookHeaders(body, { 'X-Shopify-Topic': 'orders/updated' }), auth: false });
   assert.equal(ok.status, 200);
-  assert.equal(store.getOrder('1'), undefined, 'an update does not create or change anything');
+  assert.equal((await store.getOrder('1')), undefined, 'an update does not create or change anything');
 });

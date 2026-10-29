@@ -1,5 +1,7 @@
-# Render blueprint. Needs a paid instance (always on) and a disk for the SQLite file.
-# A disk also means Render runs one instance only, which the cap relies on.
+# Render blueprint. The data lives in a hosted Turso database (free plan), so there is no disk:
+# Render keeps zero-downtime deploys, and the leader lock in the app makes sure only one running
+# copy processes orders while the old and new copies overlap during a deploy.
+# The web service must be always on (Starter): a free instance sleeps and would miss the timers.
 services:
   - type: web
     name: golden-tray
@@ -13,13 +15,11 @@ services:
         value: production
       - key: NODE_VERSION
         value: 22.13.0
-      - key: DATA_DIR
-        value: /var/data
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_AUTH_TOKEN
+        sync: false
       - key: SHOPIFY_DOMAIN
-        sync: false
-      - key: SHOPIFY_CLIENT_ID
-        sync: false
-      - key: SHOPIFY_CLIENT_SECRET
         sync: false
       - key: SHOPIFY_ACCESS_TOKEN
         sync: false
@@ -31,7 +31,3 @@ services:
         generateValue: true
       - key: PUBLIC_URL
         sync: false
-    disk:
-      name: golden-tray-data
-      mountPath: /var/data
-      sizeGB: 1
